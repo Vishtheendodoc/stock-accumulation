@@ -303,11 +303,11 @@ def process_bhavcopy(file_path, date, db_path):
         # ✅ Remove rows with NaN delivery percentage
         df = df.dropna(subset=["DELIV_PER"])
 
-        # ✅ Filter stocks with high delivery percentage (>60%)
-        df = df[df["DELIV_PER"] > 60]
+        # ✅ Filter stocks with high delivery percentage (>10%)
+        df = df[df["DELIV_PER"] > 10]
 
         if df.empty:
-            st.warning("⚠️ No stocks found with DELIV_PER > 60%. Try lowering the threshold.")
+            st.warning("⚠️ No stocks found with DELIV_PER > 10%. Try lowering the threshold.")
             return None
 
         # ✅ Select only required columns
@@ -338,7 +338,7 @@ def get_accumulation_stocks(days=5):
                 FROM bhavcopy
                 WHERE date >= date('now', '-{days} days')
                 GROUP BY symbol
-                HAVING avg_deliv_per > 60 AND avg_trades > 1  -- ✅ Only include liquid stocks
+                HAVING avg_deliv_per > 10 AND avg_trades > 1  -- ✅ Only include liquid stocks
                 ORDER BY avg_deliv_qty DESC
             '''
             return pd.read_sql(query, conn)
