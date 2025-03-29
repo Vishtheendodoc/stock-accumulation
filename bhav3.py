@@ -8,10 +8,22 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import requests
 import json
+from io import StringIO
+import plotly.express as px
+import requests
+import pandas as pd
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+from io import StringIO
+import numpy as np
+
+st.set_page_config(layout="wide", page_title="NSE F&O Participant Data Dashboard")
 # Telegram Bot Credentials
 
 TELEGRAM_BOT_TOKEN = "7512763823:AAHwJN9YplSKy30gnIFZT5zIzBCZVYDsWLw"
-TELEGRAM_CHAT_ID = "-4690137264"
+TELEGRAM_CHAT_ID = "-469013726"
 
 # Database setup
 db_path = "bhavcopy_data.db"
@@ -303,11 +315,11 @@ def process_bhavcopy(file_path, date, db_path):
         # ✅ Remove rows with NaN delivery percentage
         df = df.dropna(subset=["DELIV_PER"])
 
-        # ✅ Filter stocks with high delivery percentage (>30%)
-        df = df[df["DELIV_PER"] > 30]
+        # ✅ Filter stocks with high delivery percentage (>60%)
+        df = df[df["DELIV_PER"] > 60]
 
         if df.empty:
-            st.warning("⚠️ No stocks found with DELIV_PER > 30%. Try lowering the threshold.")
+            st.warning("⚠️ No stocks found with DELIV_PER > 60%. Try lowering the threshold.")
             return None
 
         # ✅ Select only required columns
@@ -338,13 +350,120 @@ def get_accumulation_stocks(days=5):
                 FROM bhavcopy
                 WHERE date >= date('now', '-{days} days')
                 GROUP BY symbol
-                HAVING avg_deliv_per > 30 AND avg_trades > 1  -- ✅ Only include liquid stocks
+                HAVING avg_deliv_per > 60 AND avg_trades > 1  -- ✅ Only include liquid stocks
                 ORDER BY avg_deliv_qty DESC
             '''
             return pd.read_sql(query, conn)
     except Exception as e:
         st.error(f"Error fetching accumulation stocks: {e}")
         return pd.DataFrame()
+
+# Function to fetch F&O Participant OI data from NSE archives
+def fetch_fo_participant_oi(date):
+    """Fetch F&O participant OI data CSV for a given date."""
+    url = f"https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_{date}.csv"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.text  # Return CSV content
+        else:
+            st.error(f"Failed to fetch data for {date}: {response.status_code}")
+            return None
+    except requests.RequestException as e:
+        st.error(f"Request error: {e}")
+        return None
+
+# Clean and process the CSV data
+def clean_participant_oi_data(csv_content, date_str):
+    """Clean and structure the participant OI data."""
+    try:
+        # Read CSV content
+        df = pd.read_csv(StringIO(csv_content), skiprows=1)
+        
+        # Extract only the relevant data
+        # Find rows with client types
+        client_types = ['Client', 'DII', 'FII', 'Pro', 'TOTAL']
+        
+        # Find client type column
+        client_type_col = df.columns[0]
+        
+        # Filter rows with valid client types
+        df = df[df[client_type_col].isin(client_types)]
+        
+        # Rename columns properly
+        column_names = [
+            'Client_Type', 'Future_Index_Long', 'Future_Index_Short', 
+            'Future_Stock_Long', 'Future_Stock_Short',
+            'Option_Index_Call_Long', 'Option_Index_Put_Long', 
+            'Option_Index_Call_Short', 'Option_Index_Put_Short',
+            'Option_Stock_Call_Long', 'Option_Stock_Put_Long', 
+            'Option_Stock_Call_Short', 'Option_Stock_Put_Short',
+            'Total_Long_Contracts', 'Total_Short_Contracts'
+        ]
+        
+        # Use only up to the number of columns we want to rename
+        actual_cols = min(len(df.columns), len(column_names))
+        rename_dict = {df.columns[i]: column_names[i] for i in range(actual_cols)}
+        df = df.rename(columns=rename_dict)
+        
+        # Convert columns to numeric
+        for col in df.columns:
+            if col != 'Client_Type':
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Add date column in proper format
+        df['Date'] = pd.to_datetime(date_str, format='%d%m%Y').strftime('%Y-%m-%d')
+        
+        return df
+    except Exception as e:
+        st.error(f"Error processing data for {date_str}: {str(e)}")
+        return None
+
+# Function to fetch data for the last N trading days
+@st.cache_data(ttl=3600)  # Cache data for 1 hour
+def get_trading_days_oi(days=15):
+    """Fetch F&O participant OI for the specified number of trading days."""
+    oi_data = []
+    date = datetime.today()
+    count = 0
+    attempts = 0
+    max_attempts = days * 3  # Allow more attempts for weekends/holidays
+    
+    progress_bar = st.progress(0)
+    
+    while count < days and attempts < max_attempts:
+        date_str = date.strftime("%d%m%Y")  # Format: DDMMYYYY
+        
+        # Update progress status
+        status_text = st.empty()
+        status_text.text(f"Fetching data for {date.strftime('%Y-%m-%d')}...")
+        
+        csv_content = fetch_fo_participant_oi(date_str)
+        
+        if csv_content:
+            cleaned_df = clean_participant_oi_data(csv_content, date_str)
+            if cleaned_df is not None and not cleaned_df.empty:
+                oi_data.append(cleaned_df)
+                count += 1
+                progress_bar.progress(count / days)
+                status_text.text(f"Successfully processed data for {date.strftime('%Y-%m-%d')} ({count}/{days})")
+        
+        # Move to the previous day
+        date -= timedelta(days=1)
+        attempts += 1
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    if oi_data:
+        # Combine all dataframes
+        result_df = pd.concat(oi_data, ignore_index=True)
+        return result_df
+    else:
+        st.error("No data was collected. Please check if the NSE website is accessible.")
+        return None
 
 # Streamlit UI
 st.title("NSE Bhavcopy Analysis - High Delivery & Accumulation")
@@ -710,6 +829,383 @@ if not high_ratio_stocks.empty:
                 st.sidebar.error(f"❌ Failed to send alert for {symbol}: {e}")
 else:
     st.sidebar.info("📊 No high delivery/trade ratio stocks found today.")
+
+# Display in Streamlit
+    st.title("NSE F&O Participant Open Interest Dashboard")
+    
+    st.sidebar.header("Dashboard Settings")
+    days_to_fetch = st.sidebar.slider("Number of trading days to fetch", 5, 30, 15)
+    
+    # Fetch data
+    with st.spinner("Fetching F&O participant data..."):
+        oi_df = get_trading_days_oi(days=days_to_fetch)
+    
+    if oi_df is not None:
+        # Add dropdown to select specific date
+        available_dates = sorted(oi_df['Date'].unique(), reverse=True)
+        selected_date = st.selectbox("Select Date for F&O Participant Data", options=available_dates)
+        
+        # Get previous date for comparison
+        available_dates_sorted = sorted(oi_df['Date'].unique())
+        selected_date_index = available_dates_sorted.index(selected_date)
+        previous_date = available_dates_sorted[selected_date_index - 1] if selected_date_index > 0 else None
+        
+        # Create tabs for different views
+        tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Daily Change", "Time Series Analysis", "Long-Short Ratio"])
+        
+        with tab1:
+            st.subheader(f"F&O Participant Data - {selected_date}")
+            # Get the selected date data
+            selected_data = oi_df[oi_df['Date'] == selected_date]
+            
+            # Exclude TOTAL row for the charts
+            chart_data = selected_data[selected_data['Client_Type'] != 'TOTAL']
+            
+            # Create two columns for the layout
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Long positions chart
+                fig_long = px.bar(
+                    chart_data,
+                    x='Client_Type',
+                    y=['Future_Index_Long', 'Future_Stock_Long', 'Option_Index_Call_Long', 
+                       'Option_Index_Put_Long', 'Option_Stock_Call_Long', 'Option_Stock_Put_Long'],
+                    title=f"Long Positions by Participant Type ({selected_date})",
+                    labels={'value': 'Contracts', 'variable': 'Position Type'},
+                    color_discrete_sequence=px.colors.qualitative.Set1
+                )
+                st.plotly_chart(fig_long)
+            
+            with col2:
+                # Short positions chart
+                fig_short = px.bar(
+                    chart_data,
+                    x='Client_Type',
+                    y=['Future_Index_Short', 'Future_Stock_Short', 'Option_Index_Call_Short', 
+                       'Option_Index_Put_Short', 'Option_Stock_Call_Short', 'Option_Stock_Put_Short'],
+                    title=f"Short Positions by Participant Type ({selected_date})",
+                    labels={'value': 'Contracts', 'variable': 'Position Type'},
+                    color_discrete_sequence=px.colors.qualitative.Set2
+                )
+                st.plotly_chart(fig_short)
+            
+            # Display total long-short balance
+            st.subheader("Total Position Summary")
+            total_summary = selected_data[selected_data['Client_Type'] == 'TOTAL']
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Long Contracts", f"{int(total_summary['Total_Long_Contracts'].values[0]):,}")
+            with col2:
+                st.metric("Total Short Contracts", f"{int(total_summary['Total_Short_Contracts'].values[0]):,}")
+            with col3:
+                long_short_ratio = total_summary['Total_Long_Contracts'].values[0] / total_summary['Total_Short_Contracts'].values[0]
+                st.metric("Long/Short Ratio", f"{long_short_ratio:.2f}")
+            
+            # Raw data table with formatting
+            st.subheader("Raw Data")
+            st.dataframe(selected_data.style.format({col: '{:,.0f}' for col in selected_data.columns 
+                                                 if col not in ['Client_Type', 'Date']}))
+        
+        with tab2:
+            if previous_date:
+                st.subheader(f"Daily Change Analysis ({selected_date} vs {previous_date})")
+                
+                # Get data for selected and previous day
+                current_day_data = oi_df[oi_df['Date'] == selected_date].copy()
+                previous_day_data = oi_df[oi_df['Date'] == previous_date].copy()
+                
+                # Prepare data for comparison
+                current_day_data.set_index('Client_Type', inplace=True)
+                previous_day_data.set_index('Client_Type', inplace=True)
+                
+                # Calculate changes
+                numeric_columns = [col for col in current_day_data.columns if col not in ['Date']]
+                change_data = current_day_data[numeric_columns] - previous_day_data[numeric_columns]
+                change_data_pct = ((current_day_data[numeric_columns] - previous_day_data[numeric_columns]) / 
+                                    previous_day_data[numeric_columns].abs()) * 100
+                
+                # Reset index for plotting
+                change_data.reset_index(inplace=True)
+                change_data_pct.reset_index(inplace=True)
+                
+                # Filter out TOTAL for charts
+                change_chart_data = change_data[change_data['Client_Type'] != 'TOTAL']
+                
+                # Display absolute changes
+                st.subheader("Absolute Changes in Positions")
+                
+                # Display changes by client type
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Net change in long positions
+                    fig_change_long = px.bar(
+                        change_chart_data,
+                        x='Client_Type',
+                        y='Total_Long_Contracts',
+                        title="Change in Long Positions",
+                        color='Total_Long_Contracts',
+                        color_continuous_scale=px.colors.diverging.RdBu,
+                        labels={'Total_Long_Contracts': 'Change in Contracts'}
+                    )
+                    fig_change_long.update_layout(coloraxis_colorbar=dict(title="Contracts"))
+                    st.plotly_chart(fig_change_long)
+                
+                with col2:
+                    # Net change in short positions
+                    fig_change_short = px.bar(
+                        change_chart_data,
+                        x='Client_Type',
+                        y='Total_Short_Contracts',
+                        title="Change in Short Positions",
+                        color='Total_Short_Contracts',
+                        color_continuous_scale=px.colors.diverging.RdBu,
+                        labels={'Total_Short_Contracts': 'Change in Contracts'}
+                    )
+                    fig_change_short.update_layout(coloraxis_colorbar=dict(title="Contracts"))
+                    st.plotly_chart(fig_change_short)
+                
+                # Detailed position changes
+                st.subheader("Detailed Position Changes")
+                
+                # Position type selector for detailed changes
+                position_groups = {
+                    "Futures - Index": ['Future_Index_Long', 'Future_Index_Short'],
+                    "Futures - Stock": ['Future_Stock_Long', 'Future_Stock_Short'],
+                    "Options - Index Calls": ['Option_Index_Call_Long', 'Option_Index_Call_Short'],
+                    "Options - Index Puts": ['Option_Index_Put_Long', 'Option_Index_Put_Short'],
+                    "Options - Stock Calls": ['Option_Stock_Call_Long', 'Option_Stock_Call_Short'],
+                    "Options - Stock Puts": ['Option_Stock_Put_Long', 'Option_Stock_Put_Short']
+                }
+                
+                selected_position_group = st.selectbox("Select Position Group", options=list(position_groups.keys()))
+                selected_columns = position_groups[selected_position_group]
+                
+                # Create heatmap showing changes by client type
+                change_pivot = change_data.melt(
+                    id_vars=['Client_Type'],
+                    value_vars=selected_columns,
+                    var_name='Position_Type',
+                    value_name='Change'
+                )
+                change_pivot = change_pivot[change_pivot['Client_Type'] != 'TOTAL']
+                
+                fig_heatmap = px.density_heatmap(
+                    change_pivot,
+                    x='Client_Type',
+                    y='Position_Type',
+                    z='Change',
+                    title=f"Change Heatmap for {selected_position_group}",
+                    color_continuous_scale=px.colors.diverging.RdBu,
+                    labels={'Change': 'Contract Change'}
+                )
+                fig_heatmap.update_layout(coloraxis_colorbar=dict(title="Contract Change"))
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+                
+                # Summary metrics by participant type
+            st.subheader("Key Change Metrics by Participant Type")
+
+            # Get data for all participant types (excluding TOTAL)
+            participant_types = [client for client in current_day_data.index if client != 'TOTAL']
+
+            # Create a DataFrame to hold the changes
+            change_summary = pd.DataFrame()
+
+            for client in participant_types:
+                # Calculate key metrics for each participant
+                current_long = current_day_data.loc[client, 'Total_Long_Contracts']
+                current_short = current_day_data.loc[client, 'Total_Short_Contracts']
+                previous_long = previous_day_data.loc[client, 'Total_Long_Contracts']
+                previous_short = previous_day_data.loc[client, 'Total_Short_Contracts']
+                
+                long_pct_change = (current_long - previous_long) / previous_long * 100
+                short_pct_change = (current_short - previous_short) / previous_short * 100
+                
+                current_ratio = current_long / current_short
+                previous_ratio = previous_long / previous_short
+                ratio_change = current_ratio - previous_ratio
+                
+                # Add to the summary DataFrame
+                change_summary.loc[client, 'Long_Pct_Change'] = long_pct_change
+                change_summary.loc[client, 'Short_Pct_Change'] = short_pct_change
+                change_summary.loc[client, 'Current_Ratio'] = current_ratio
+                change_summary.loc[client, 'Ratio_Change'] = ratio_change
+
+            # Display metrics in a more visual way using columns
+            for client in participant_types:
+                st.markdown(f"### {client}")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        "Long Positions % Change", 
+                        f"{change_summary.loc[client, 'Long_Pct_Change']:.2f}%", 
+                        delta=None
+                    )
+                with col2:
+                    st.metric(
+                        "Short Positions % Change", 
+                        f"{change_summary.loc[client, 'Short_Pct_Change']:.2f}%", 
+                        delta=None
+                    )
+                with col3:
+                    st.metric(
+                        "Long/Short Ratio", 
+                        f"{change_summary.loc[client, 'Current_Ratio']:.2f}", 
+                        f"{change_summary.loc[client, 'Ratio_Change']:+.2f}"
+                    )
+                
+                # Add a sentiment indicator based on changes
+                if change_summary.loc[client, 'Long_Pct_Change'] > change_summary.loc[client, 'Short_Pct_Change']:
+                    st.markdown(f"**{client} Sentiment:** 🟢 Becoming more bullish")
+                elif change_summary.loc[client, 'Long_Pct_Change'] < change_summary.loc[client, 'Short_Pct_Change']:
+                    st.markdown(f"**{client} Sentiment:** 🔴 Becoming more bearish")
+                else:
+                    st.markdown(f"**{client} Sentiment:** ⚪ Neutral")
+                
+                st.markdown("---")
+
+            # Add a visualization to compare participant behavior
+            st.subheader("Participant Sentiment Comparison")
+
+            # Prepare data for visualization
+            sentiment_data = pd.DataFrame({
+                'Participant': participant_types,
+                'Long_Change': [change_summary.loc[client, 'Long_Pct_Change'] for client in participant_types],
+                'Short_Change': [change_summary.loc[client, 'Short_Pct_Change'] for client in participant_types],
+                'Net_Sentiment': [change_summary.loc[client, 'Long_Pct_Change'] - change_summary.loc[client, 'Short_Pct_Change'] 
+                                for client in participant_types]
+            })
+
+            # Create a bar chart showing net sentiment
+            fig_sentiment = px.bar(
+                sentiment_data,
+                x='Participant',
+                y='Net_Sentiment',
+                title="Net Position Change (Long % Change - Short % Change)",
+                color='Net_Sentiment',
+                color_continuous_scale=px.colors.diverging.RdBu,
+                labels={'Net_Sentiment': 'Long-Short Differential (%)'}
+            )
+
+            fig_sentiment.update_layout(
+                xaxis_title="Participant Type",
+                yaxis_title="Long vs Short Change Differential (%)",
+                coloraxis_colorbar=dict(title="Sentiment")
+            )
+
+            fig_sentiment.add_hline(y=0, line_dash="dash", line_color="gray", 
+                                annotation_text="Neutral Line")
+
+            st.plotly_chart(fig_sentiment, use_container_width=True)
+
+            # Add interpretation guide
+            st.info("""
+            ### Interpreting Participant Sentiment:
+            - **Positive values (blue)**: Participant is adding more long positions than short positions (becoming more bullish)
+            - **Negative values (red)**: Participant is adding more short positions than long positions (becoming more bearish)
+            - **Values near zero**: Participant is maintaining similar position balance
+
+            Compare different participants to understand which market players are driving current trends.
+            """)
+        
+        with tab3:
+            st.subheader("F&O Participant Trends Over Time")
+            
+            # Filter data for the chart
+            time_data = oi_df[oi_df['Client_Type'] != 'TOTAL'].copy()
+            # Convert date to proper datetime
+            time_data['Date'] = pd.to_datetime(time_data['Date'])
+            
+            # Position type selector
+            position_type = st.selectbox(
+                "Select Position Type",
+                options=[
+                    "Total_Long_Contracts", "Total_Short_Contracts",
+                    "Future_Index_Long", "Future_Index_Short",
+                    "Future_Stock_Long", "Future_Stock_Short",
+                    "Option_Index_Call_Long", "Option_Index_Call_Short",
+                    "Option_Index_Put_Long", "Option_Index_Put_Short",
+                    "Option_Stock_Call_Long", "Option_Stock_Call_Short",
+                    "Option_Stock_Put_Long", "Option_Stock_Put_Short"
+                ],
+                index=0
+            )
+            
+            # Create time series chart
+            fig_time = px.line(
+                time_data,
+                x='Date',
+                y=position_type,
+                color='Client_Type',
+                title=f"{position_type.replace('_', ' ')} Trend",
+                labels={'Date': 'Trading Date', position_type: 'Contracts'},
+                markers=True
+            )
+            fig_time.update_layout(xaxis_title="Date", yaxis_title="Contracts")
+            st.plotly_chart(fig_time, use_container_width=True)
+            
+            # Show stacked area chart
+            st.subheader("Composition of Market Participants Over Time")
+            
+            fig_area = px.area(
+                time_data,
+                x='Date',
+                y=position_type,
+                color='Client_Type',
+                title=f"{position_type.replace('_', ' ')} Distribution",
+                labels={'Date': 'Trading Date', position_type: 'Contracts'}
+            )
+            st.plotly_chart(fig_area, use_container_width=True)
+        
+        with tab4:
+            st.subheader("Long-Short Ratio Analysis")
+            
+            # Calculate long-short ratio for each client type
+            ratio_data = oi_df.copy()
+            ratio_data['Long_Short_Ratio'] = ratio_data['Total_Long_Contracts'] / ratio_data['Total_Short_Contracts']
+            
+            # Filter out TOTAL row and NaN/inf values
+            ratio_data = ratio_data[ratio_data['Client_Type'] != 'TOTAL']
+            ratio_data = ratio_data.replace([np.inf, -np.inf], np.nan).dropna(subset=['Long_Short_Ratio'])
+            
+            # Convert date to proper datetime for sorting
+            ratio_data['Date'] = pd.to_datetime(ratio_data['Date'])
+            ratio_data = ratio_data.sort_values('Date')
+            
+            # Create long-short ratio chart
+            fig_ratio = px.line(
+                ratio_data,
+                x='Date',
+                y='Long_Short_Ratio',
+                color='Client_Type',
+                title="Long-Short Ratio by Participant Type",
+                labels={'Date': 'Trading Date', 'Long_Short_Ratio': 'Long/Short Ratio'},
+                markers=True
+            )
+            
+            # Add reference line at 1.0
+            fig_ratio.add_hline(y=1.0, line_dash="dash", line_color="gray", 
+                              annotation_text="Equal Long-Short")
+            
+            fig_ratio.update_layout(
+                yaxis_title="Long/Short Ratio (> 1.0 means more long positions)",
+                hovermode="x unified"
+            )
+            
+            st.plotly_chart(fig_ratio, use_container_width=True)
+            
+            # Show explanation
+            st.info("""
+            ### Understanding the Long-Short Ratio:
+            - **Ratio > 1.0**: Participant holds more long positions than short positions (bullish)
+            - **Ratio = 1.0**: Participant has equal long and short positions (neutral)
+            - **Ratio < 1.0**: Participant holds more short positions than long positions (bearish)
+            
+            The ratio trends can be indicative of market sentiment among different participant types.
+            """)
 
 # Add a refresh button for real-time updates
 if st.button("🔄 Refresh Alerts"):
