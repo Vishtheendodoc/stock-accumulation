@@ -23,7 +23,7 @@ st.set_page_config(layout="wide", page_title="NSE F&O Participant Data Dashboard
 # Telegram Bot Credentials
 
 TELEGRAM_BOT_TOKEN = "7512763823:AAHwJN9YplSKy30gnIFZT5zIzBCZVYDsWLw"
-TELEGRAM_CHAT_ID = "-469013726"
+TELEGRAM_CHAT_ID = "-4690137264"
 
 # Database setup
 db_path = "bhavcopy_data.db"
