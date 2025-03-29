@@ -23,7 +23,7 @@ st.set_page_config(layout="wide", page_title="NSE F&O Participant Data Dashboard
 # Telegram Bot Credentials
 
 TELEGRAM_BOT_TOKEN = "7512763823:AAHwJN9YplSKy30gnIFZT5zIzBCZVYDsWLw"
-TELEGRAM_CHAT_ID = "-4690137264"
+TELEGRAM_CHAT_ID = "-469013726"
 
 # Database setup
 db_path = "bhavcopy_data.db"
@@ -465,6 +465,92 @@ def get_trading_days_oi(days=15):
         st.error("No data was collected. Please check if the NSE website is accessible.")
         return None
 
+def analyze_participant_sentiment(data, participant_type):
+    """Analyze sentiment based on specific position types for a given participant"""
+    sentiment_analysis = {}
+    
+    # Future Index sentiment
+    if data.loc[participant_type, 'Future_Index_Long'] > data.loc[participant_type, 'Future_Index_Short']:
+        sentiment_analysis['Future_Index'] = {
+            'sentiment': 'Bullish',
+            'description': f"{participant_type} Future Index Long > Future Index Short → Bullish on index",
+            'icon': '🟢',
+            'long': data.loc[participant_type, 'Future_Index_Long'],
+            'short': data.loc[participant_type, 'Future_Index_Short'],
+            'ratio': data.loc[participant_type, 'Future_Index_Long'] / data.loc[participant_type, 'Future_Index_Short']
+        }
+    else:
+        sentiment_analysis['Future_Index'] = {
+            'sentiment': 'Bearish',
+            'description': f"{participant_type} Future Index Short > Future Index Long → Bearish on index",
+            'icon': '🔴',
+            'long': data.loc[participant_type, 'Future_Index_Long'],
+            'short': data.loc[participant_type, 'Future_Index_Short'],
+            'ratio': data.loc[participant_type, 'Future_Index_Long'] / data.loc[participant_type, 'Future_Index_Short']
+        }
+    
+    # Future Stock sentiment
+    if data.loc[participant_type, 'Future_Stock_Long'] > data.loc[participant_type, 'Future_Stock_Short']:
+        sentiment_analysis['Future_Stock'] = {
+            'sentiment': 'Bullish',
+            'description': f"{participant_type} Future Stock Long > Future Stock Short → Bullish stock sentiment",
+            'icon': '🟢',
+            'long': data.loc[participant_type, 'Future_Stock_Long'],
+            'short': data.loc[participant_type, 'Future_Stock_Short'],
+            'ratio': data.loc[participant_type, 'Future_Stock_Long'] / data.loc[participant_type, 'Future_Stock_Short']
+        }
+    else:
+        sentiment_analysis['Future_Stock'] = {
+            'sentiment': 'Bearish',
+            'description': f"{participant_type} Future Stock Short > Future Stock Long → Bearish stock sentiment",
+            'icon': '🔴',
+            'long': data.loc[participant_type, 'Future_Stock_Long'],
+            'short': data.loc[participant_type, 'Future_Stock_Short'],
+            'ratio': data.loc[participant_type, 'Future_Stock_Long'] / data.loc[participant_type, 'Future_Stock_Short']
+        }
+    
+    # Option Index Call sentiment
+    if data.loc[participant_type, 'Option_Index_Call_Long'] > data.loc[participant_type, 'Option_Index_Call_Short']:
+        sentiment_analysis['Option_Index_Call'] = {
+            'sentiment': 'Bullish',
+            'description': f"{participant_type} Call Long > Call Short → Bullish on index",
+            'icon': '🟢',
+            'long': data.loc[participant_type, 'Option_Index_Call_Long'],
+            'short': data.loc[participant_type, 'Option_Index_Call_Short'],
+            'ratio': data.loc[participant_type, 'Option_Index_Call_Long'] / data.loc[participant_type, 'Option_Index_Call_Short']
+        }
+    else:
+        sentiment_analysis['Option_Index_Call'] = {
+            'sentiment': 'Bearish',
+            'description': f"{participant_type} Call Writing (Short Call > Long Call) → Bearish on index",
+            'icon': '🔴',
+            'long': data.loc[participant_type, 'Option_Index_Call_Long'],
+            'short': data.loc[participant_type, 'Option_Index_Call_Short'],
+            'ratio': data.loc[participant_type, 'Option_Index_Call_Long'] / data.loc[participant_type, 'Option_Index_Call_Short']
+        }
+    
+    # Option Index Put sentiment
+    if data.loc[participant_type, 'Option_Index_Put_Long'] > data.loc[participant_type, 'Option_Index_Put_Short']:
+        sentiment_analysis['Option_Index_Put'] = {
+            'sentiment': 'Bearish',
+            'description': f"{participant_type} Put Long > Put Short → Bearish on index",
+            'icon': '🔴',
+            'long': data.loc[participant_type, 'Option_Index_Put_Long'],
+            'short': data.loc[participant_type, 'Option_Index_Put_Short'],
+            'ratio': data.loc[participant_type, 'Option_Index_Put_Long'] / data.loc[participant_type, 'Option_Index_Put_Short']
+        }
+    else:
+        sentiment_analysis['Option_Index_Put'] = {
+            'sentiment': 'Bullish',
+            'description': f"{participant_type} Put Writing (Short Put > Long Put) → Bullish on index",
+            'icon': '🟢',
+            'long': data.loc[participant_type, 'Option_Index_Put_Long'],
+            'short': data.loc[participant_type, 'Option_Index_Put_Short'],
+            'ratio': data.loc[participant_type, 'Option_Index_Put_Long'] / data.loc[participant_type, 'Option_Index_Put_Short']
+        }
+    
+    return sentiment_analysis
+
 # Streamlit UI
 st.title("NSE Bhavcopy Analysis - High Delivery & Accumulation")
 
@@ -831,7 +917,7 @@ else:
     st.sidebar.info("📊 No high delivery/trade ratio stocks found today.")
 
 # Display in Streamlit
-    st.title("NSE F&O Participant Open Interest Dashboard")
+    st.subheader("NSE F&O Participant Open Interest Dashboard")
     
     st.sidebar.header("Dashboard Settings")
     days_to_fetch = st.sidebar.slider("Number of trading days to fetch", 5, 30, 15)
@@ -851,7 +937,7 @@ else:
         previous_date = available_dates_sorted[selected_date_index - 1] if selected_date_index > 0 else None
         
         # Create tabs for different views
-        tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Daily Change", "Time Series Analysis", "Long-Short Ratio"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Overview", "Daily Change", "Position Sentiment", "Time Series Analysis", "Long-Short Ratio"])
         
         with tab1:
             st.subheader(f"F&O Participant Data - {selected_date}")
@@ -967,6 +1053,46 @@ else:
                     fig_change_short.update_layout(coloraxis_colorbar=dict(title="Contracts"))
                     st.plotly_chart(fig_change_short)
                 
+                if previous_date and 'previous_day_data' in locals():
+                    st.subheader("Sentiment Change Analysis")
+                    client_types = ['Client', 'DII', 'FII', 'Pro', 'TOTAL']
+                    selected_participant_change = st.selectbox("Select Participant for Sentiment Change", 
+                                                            options=client_types,
+                                                            key="participant_change")
+                    
+                    # Analyze current and previous sentiment
+                    current_sentiment = analyze_participant_sentiment(current_day_data, selected_participant_change)
+                    previous_sentiment = analyze_participant_sentiment(previous_day_data, selected_participant_change)
+                    
+                    # Create a DataFrame to display the changes
+                    sentiment_change = pd.DataFrame(index=['Future_Index', 'Future_Stock', 
+                                                        'Option_Index_Call', 'Option_Index_Put'],
+                                                columns=['Previous_Sentiment', 'Current_Sentiment', 
+                                                        'Previous_Ratio', 'Current_Ratio', 'Ratio_Change'])
+                    
+                    for position in sentiment_change.index:
+                        sentiment_change.loc[position, 'Previous_Sentiment'] = previous_sentiment[position]['sentiment']
+                        sentiment_change.loc[position, 'Current_Sentiment'] = current_sentiment[position]['sentiment']
+                        sentiment_change.loc[position, 'Previous_Ratio'] = previous_sentiment[position]['ratio']
+                        sentiment_change.loc[position, 'Current_Ratio'] = current_sentiment[position]['ratio']
+                        sentiment_change.loc[position, 'Ratio_Change'] = current_sentiment[position]['ratio'] - previous_sentiment[position]['ratio']
+                        sentiment_change.loc[position, 'Sentiment_Changed'] = previous_sentiment[position]['sentiment'] != current_sentiment[position]['sentiment']
+                    
+                    # Highlight sentiment flips
+                    for position in sentiment_change.index:
+                        if sentiment_change.loc[position, 'Sentiment_Changed']:
+                            prev = sentiment_change.loc[position, 'Previous_Sentiment']
+                            curr = sentiment_change.loc[position, 'Current_Sentiment']
+                            
+                            if prev == 'Bearish' and curr == 'Bullish':
+                                st.warning(f"⚠️ **SENTIMENT FLIP** in {position}: Changed from Bearish to Bullish")
+                            elif prev == 'Bullish' and curr == 'Bearish':
+                                st.warning(f"⚠️ **SENTIMENT FLIP** in {position}: Changed from Bullish to Bearish")
+                    
+                    # Display the sentiment change table
+                    st.dataframe(sentiment_change[['Previous_Sentiment', 'Current_Sentiment', 
+                                                'Previous_Ratio', 'Current_Ratio', 'Ratio_Change']])
+                
                 # Detailed position changes
                 st.subheader("Detailed Position Changes")
                 
@@ -1008,12 +1134,12 @@ else:
             st.subheader("Key Change Metrics by Participant Type")
 
             # Get data for all participant types (excluding TOTAL)
-            participant_types = [client for client in current_day_data.index if client != 'TOTAL']
+            client_types = [client for client in current_day_data.index if client != 'TOTAL']
 
             # Create a DataFrame to hold the changes
             change_summary = pd.DataFrame()
 
-            for client in participant_types:
+            for client in client_types:
                 # Calculate key metrics for each participant
                 current_long = current_day_data.loc[client, 'Total_Long_Contracts']
                 current_short = current_day_data.loc[client, 'Total_Short_Contracts']
@@ -1034,7 +1160,7 @@ else:
                 change_summary.loc[client, 'Ratio_Change'] = ratio_change
 
             # Display metrics in a more visual way using columns
-            for client in participant_types:
+            for client in client_types:
                 st.markdown(f"### {client}")
                 
                 col1, col2, col3 = st.columns(3)
@@ -1072,11 +1198,11 @@ else:
 
             # Prepare data for visualization
             sentiment_data = pd.DataFrame({
-                'Participant': participant_types,
-                'Long_Change': [change_summary.loc[client, 'Long_Pct_Change'] for client in participant_types],
-                'Short_Change': [change_summary.loc[client, 'Short_Pct_Change'] for client in participant_types],
+                'Participant': client_types,
+                'Long_Change': [change_summary.loc[client, 'Long_Pct_Change'] for client in client_types],
+                'Short_Change': [change_summary.loc[client, 'Short_Pct_Change'] for client in client_types],
                 'Net_Sentiment': [change_summary.loc[client, 'Long_Pct_Change'] - change_summary.loc[client, 'Short_Pct_Change'] 
-                                for client in participant_types]
+                                for client in client_types]
             })
 
             # Create a bar chart showing net sentiment
@@ -1112,6 +1238,166 @@ else:
             """)
         
         with tab3:
+            st.subheader(f"Position-Based Sentiment Analysis - {selected_date}")
+            
+            # Get the selected date data
+            selected_data = oi_df[oi_df['Date'] == selected_date].copy()
+            
+            # Set Client_Type as index for easier access
+            selected_data.set_index('Client_Type', inplace=True)
+            
+            # Create participant selector
+            client_types = [client for client in selected_data.index if client != 'TOTAL']
+            selected_participant = st.selectbox("Select Participant Type", options=client_types)
+            
+            # Analyze sentiment for selected participant
+            sentiment_analysis = analyze_participant_sentiment(selected_data, selected_participant)
+            
+            # Display sentiment results in a visually appealing way
+            st.subheader(f"{selected_participant} Position Sentiment")
+            
+            # Future positions sentiment
+            st.markdown("### Futures Positions")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"#### {sentiment_analysis['Future_Index']['icon']} Index Futures")
+                st.markdown(sentiment_analysis['Future_Index']['description'])
+                st.metric(
+                    "Long/Short Ratio", 
+                    f"{sentiment_analysis['Future_Index']['ratio']:.2f}",
+                    delta=None
+                )
+                st.markdown(f"""
+                - Long: {sentiment_analysis['Future_Index']['long']:,.0f} contracts
+                - Short: {sentiment_analysis['Future_Index']['short']:,.0f} contracts
+                """)
+            
+            with col2:
+                st.markdown(f"#### {sentiment_analysis['Future_Stock']['icon']} Stock Futures")
+                st.markdown(sentiment_analysis['Future_Stock']['description'])
+                st.metric(
+                    "Long/Short Ratio", 
+                    f"{sentiment_analysis['Future_Stock']['ratio']:.2f}",
+                    delta=None
+                )
+                st.markdown(f"""
+                - Long: {sentiment_analysis['Future_Stock']['long']:,.0f} contracts
+                - Short: {sentiment_analysis['Future_Stock']['short']:,.0f} contracts
+                """)
+            
+            # Options positions sentiment
+            st.markdown("### Options Positions")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"#### {sentiment_analysis['Option_Index_Call']['icon']} Index Call Options")
+                st.markdown(sentiment_analysis['Option_Index_Call']['description'])
+                st.metric(
+                    "Long/Short Ratio", 
+                    f"{sentiment_analysis['Option_Index_Call']['ratio']:.2f}",
+                    delta=None
+                )
+                st.markdown(f"""
+                - Long: {sentiment_analysis['Option_Index_Call']['long']:,.0f} contracts
+                - Short: {sentiment_analysis['Option_Index_Call']['short']:,.0f} contracts
+                """)
+            
+            with col2:
+                st.markdown(f"#### {sentiment_analysis['Option_Index_Put']['icon']} Index Put Options")
+                st.markdown(sentiment_analysis['Option_Index_Put']['description'])
+                st.metric(
+                    "Long/Short Ratio", 
+                    f"{sentiment_analysis['Option_Index_Put']['ratio']:.2f}",
+                    delta=None
+                )
+                st.markdown(f"""
+                - Long: {sentiment_analysis['Option_Index_Put']['long']:,.0f} contracts
+                - Short: {sentiment_analysis['Option_Index_Put']['short']:,.0f} contracts
+                """)
+            
+            # Overall sentiment summary
+            bullish_count = sum(1 for key, value in sentiment_analysis.items() if value['sentiment'] == 'Bullish')
+            bearish_count = sum(1 for key, value in sentiment_analysis.items() if value['sentiment'] == 'Bearish')
+            
+            st.markdown("### Overall Sentiment Summary")
+            
+            # Create a visual gauge for overall sentiment
+            overall_score = bullish_count - bearish_count
+            
+            if overall_score > 1:
+                overall_sentiment = "Strongly Bullish"
+                color = "green"
+            elif overall_score == 1:
+                overall_sentiment = "Moderately Bullish"
+                color = "lightgreen"
+            elif overall_score == 0:
+                overall_sentiment = "Neutral"
+                color = "gray"
+            elif overall_score == -1:
+                overall_sentiment = "Moderately Bearish"
+                color = "pink"
+            else:
+                overall_sentiment = "Strongly Bearish"
+                color = "red"
+            
+            # Display the sentiment meter
+            st.markdown(f"""
+            <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center;">
+                <h3>{selected_participant} Overall Sentiment: <span style="color: {color};">{overall_sentiment}</span></h3>
+                <p>Based on {bullish_count} bullish signals and {bearish_count} bearish signals</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Add a comparison of all participants if we want to see everyone at once
+            st.markdown("### Compare All Participants")
+            
+            if st.checkbox("Show sentiment comparison across all participants"):
+                # Initialize a DataFrame to store sentiment scores
+                sentiment_scores = pd.DataFrame(index=client_types, 
+                                            columns=['Future_Index', 'Future_Stock', 
+                                                    'Option_Index_Call', 'Option_Index_Put', 
+                                                    'Overall_Score'])
+                
+                # Calculate sentiment for each participant
+                for participant in client_types:
+                    analysis = analyze_participant_sentiment(selected_data, participant)
+                    
+                    # Convert sentiment to numeric scores (1 for Bullish, -1 for Bearish)
+                    for key, value in analysis.items():
+                        sentiment_scores.loc[participant, key] = 1 if value['sentiment'] == 'Bullish' else -1
+                        
+                    # Calculate overall score
+                    sentiment_scores.loc[participant, 'Overall_Score'] = sentiment_scores.loc[participant].sum()
+                
+                # Display heatmap of sentiment across participants
+                fig = px.imshow(
+                    sentiment_scores,
+                    labels=dict(x="Position Type", y="Participant", color="Sentiment"),
+                    x=['Future_Index', 'Future_Stock', 'Option_Index_Call', 'Option_Index_Put', 'Overall_Score'],
+                    color_continuous_scale=px.colors.diverging.RdBu,
+                    color_continuous_midpoint=0,
+                    title="Sentiment Heatmap Across Participants (1=Bullish, -1=Bearish)"
+                )
+                
+                fig.update_layout(height=500)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Provide interpretation guide
+                st.info("""
+                ### Interpreting the Sentiment Heatmap:
+                - **Blue (1)**: Bullish sentiment for this position type
+                - **Red (-1)**: Bearish sentiment for this position type
+                - **Overall Score**: Sum of all sentiment scores (-4 to +4 range)
+                    - Higher positive scores indicate stronger bullish bias
+                    - Higher negative scores indicate stronger bearish bias
+                
+                This comparison helps identify which participants are aligned or have opposing views.
+                """)
+        
+        with tab4:
             st.subheader("F&O Participant Trends Over Time")
             
             # Filter data for the chart
@@ -1160,7 +1446,7 @@ else:
             )
             st.plotly_chart(fig_area, use_container_width=True)
         
-        with tab4:
+        with tab5:
             st.subheader("Long-Short Ratio Analysis")
             
             # Calculate long-short ratio for each client type
