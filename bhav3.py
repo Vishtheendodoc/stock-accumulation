@@ -362,7 +362,7 @@ def get_accumulation_stocks(days=5):
 def fetch_fo_participant_oi(date):
     """Fetch F&O participant OI data CSV for a given date."""
     url = f"https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_{date}.csv"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    #headers = {"User-Agent": "Mozilla/5.0"}
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
