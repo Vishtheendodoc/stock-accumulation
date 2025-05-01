@@ -23,7 +23,7 @@ st.set_page_config(layout="wide", page_title="NSE F&O Participant Data Dashboard
 # Telegram Bot Credentials
 
 TELEGRAM_BOT_TOKEN = "7512763823:AAHwJN9YplSKy30gnIFZT5zIzBCZVYDsWLw"
-TELEGRAM_CHAT_ID = "-4690137264"
+TELEGRAM_CHAT_ID = "-469013726"
 
 # Database setup
 db_path = "bhavcopy_data.db"
@@ -50,6 +50,14 @@ def send_telegram_alert(message):
     if response.status_code != 200:
         print(f"⚠️ Failed to send Telegram alert: {response.text}")
 
+#new
+def send_telegram_image(fig, caption=""):
+    """Send a Plotly figure as an image via Telegram"""
+    img_io = io.BytesIO()
+    fig.write_image(img_io, format="png")
+    img_io.seek(0)
+    bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=img_io, caption=caption)
+
 def load_previous_ratios():
     """Load stored previous day's ratios."""
     if os.path.exists(PREV_RATIOS_FILE):
@@ -66,7 +74,76 @@ def save_previous_ratios(ratios):
     with open("previous_ratios.json", "w") as f:
         json.dump(ratios, f)
 
+# Add this function somewhere in your code (after your imports and telegram setup)
+def add_manual_telegram_alert_panel():
+    """Add a panel for sending manual Telegram alerts"""
+    st.header("📱 Send Manual Telegram Alert")
+    
+    with st.expander("Create Custom Alert", expanded=False):
+        # Alert type selector
+        alert_type = st.selectbox(
+            "Alert Type",
+            options=["Market Update", "High Delivery", "Technical Signal", "Custom Message"],
+            index=3
+        )
+        
+        # Alert content
+        alert_message = st.text_area(
+            "Alert Message",
+            placeholder="Enter your custom alert message here...",
+            height=150
+        )
+        
+        # Optional: Add emoji selector
+        include_emoji = st.checkbox("Include Emoji", value=True)
+        
+        if include_emoji:
+            emoji_options = {
+                "📈": "Chart Up",
+                "📉": "Chart Down",
+                "🚀": "Rocket",
+                "⚠️": "Warning",
+                "🔔": "Bell",
+                "💰": "Money Bag",
+                "✅": "Check Mark",
+                "❌": "Cross Mark",
+                "🔴": "Red Circle",
+                "🟢": "Green Circle"
+            }
+            
+            selected_emoji = st.selectbox(
+                "Select Emoji",
+                options=list(emoji_options.keys()),
+                format_func=lambda x: f"{x} {emoji_options[x]}"
+            )
+            
+            # Format message with emoji
+            formatted_message = f"{selected_emoji} *{alert_type}*\n\n{alert_message}"
+        else:
+            formatted_message = f"*{alert_type}*\n\n{alert_message}"
+        
+        # Preview message
+        with st.container():
+            st.subheader("Message Preview")
+            st.info(formatted_message)
+        
+        # Send button
+        if st.button("🔔 Send Alert", type="primary"):
+            if alert_message.strip():
+                try:
+                    # Send the alert
+                    success = send_telegram_alert(formatted_message)
+                    if success:
+                        st.success("✅ Alert sent successfully!")
+                    else:
+                        st.error("❌ Failed to send alert. Check Telegram credentials.")
+                except Exception as e:
+                    st.error(f"❌ Error sending alert: {str(e)}")
+            else:
+                st.warning("⚠️ Please enter a message before sending.")
 
+# Add this somewhere in your main UI flow:
+# add_manual_telegram_alert_panel()
 
 # Create table if not exists
 def setup_database():
@@ -315,11 +392,11 @@ def process_bhavcopy(file_path, date, db_path):
         # ✅ Remove rows with NaN delivery percentage
         df = df.dropna(subset=["DELIV_PER"])
 
-        # ✅ Filter stocks with high delivery percentage (>60%)
-        df = df[df["DELIV_PER"] > 60]
+        # ✅ Filter stocks with high delivery percentage (>40%)
+        df = df[df["DELIV_PER"] > 40]
 
         if df.empty:
-            st.warning("⚠️ No stocks found with DELIV_PER > 60%. Try lowering the threshold.")
+            st.warning("⚠️ No stocks found with DELIV_PER > 40%. Try lowering the threshold.")
             return None
 
         # ✅ Select only required columns
@@ -350,7 +427,7 @@ def get_accumulation_stocks(days=5):
                 FROM bhavcopy
                 WHERE date >= date('now', '-{days} days')
                 GROUP BY symbol
-                HAVING avg_deliv_per > 60 AND avg_trades > 1  -- ✅ Only include liquid stocks
+                HAVING avg_deliv_per > 40 AND avg_trades > 1  -- ✅ Only include liquid stocks
                 ORDER BY avg_deliv_qty DESC
             '''
             return pd.read_sql(query, conn)
@@ -1078,7 +1155,7 @@ else:
                         sentiment_change.loc[position, 'Ratio_Change'] = current_sentiment[position]['ratio'] - previous_sentiment[position]['ratio']
                         sentiment_change.loc[position, 'Sentiment_Changed'] = previous_sentiment[position]['sentiment'] != current_sentiment[position]['sentiment']
                     
-                    # Highlight sentiment flips
+                    # Highlight sentiment flips #New
                     for position in sentiment_change.index:
                         if sentiment_change.loc[position, 'Sentiment_Changed']:
                             prev = sentiment_change.loc[position, 'Previous_Sentiment']
@@ -1086,8 +1163,12 @@ else:
                             
                             if prev == 'Bearish' and curr == 'Bullish':
                                 st.warning(f"⚠️ **SENTIMENT FLIP** in {position}: Changed from Bearish to Bullish")
+                                message = f"⚠️ **SENTIMENT FLIP** in {position}: Changed from *Bearish* to *Bullish* 🚀"
+                                send_telegram_alert(message)
                             elif prev == 'Bullish' and curr == 'Bearish':
                                 st.warning(f"⚠️ **SENTIMENT FLIP** in {position}: Changed from Bullish to Bearish")
+                                message = f"⚠️ **SENTIMENT FLIP** in {position}: Changed from *Bullish* to *Bearish* 📉"
+                                send_telegram_alert(message)
                     
                     # Display the sentiment change table
                     st.dataframe(sentiment_change[['Previous_Sentiment', 'Current_Sentiment', 
@@ -1492,6 +1573,120 @@ else:
             
             The ratio trends can be indicative of market sentiment among different participant types.
             """)
+
+def send_heatmap_alert(fig, caption="🔴🔵 **Heatmap of Position Changes**"):
+    """Convert matplotlib figure to image and send via Telegram"""
+    img_io = io.BytesIO()
+    fig.savefig(img_io, format="png", bbox_inches='tight')
+    img_io.seek(0)
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+
+    files = {"photo": img_io}
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "caption": escape_markdown(caption), "parse_mode": "MarkdownV2"}
+
+    response = requests.post(url, files=files, data=payload)
+    if response.status_code != 200:
+        print(f"⚠️ Failed to send heatmap: {response.text}")
+
+def send_net_position_change(change_data):
+    """Send net position change summary"""
+    message = "**📊 Net Position Change Summary:**\n"
+    for index, row in change_data.iterrows():
+        message += f"{index}: Longs {row['Total_Long_Contracts']} | Shorts {row['Total_Short_Contracts']}\n"
+    
+    send_telegram_alert(message)
+
+# Add this at the end of your main UI flow, after all your other UI elements:
+
+# Divider for visual separation
+st.markdown("---")
+
+# Manual alert panel
+st.header("📱 Send Manual Telegram Alert")
+
+# Create a multi-column layout
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    # Alert content
+    alert_message = st.text_area(
+        "Alert Message",
+        placeholder="Enter your custom alert message here...",
+        height=150
+    )
+    
+    # Format options
+    alert_type = st.selectbox(
+        "Alert Type",
+        options=["Market Update", "High Delivery", "Technical Signal", "Custom Message"],
+        index=3
+    )
+
+with col2:
+    # Emoji selector
+    include_emoji = st.checkbox("Include Emoji", value=True)
+    
+    if include_emoji:
+        emoji_options = {
+            "📈": "Chart Up",
+            "📉": "Chart Down",
+            "🚀": "Rocket",
+            "⚠️": "Warning",
+            "🔔": "Bell",
+            "💰": "Money Bag",
+            "✅": "Check Mark",
+            "❌": "Cross Mark",
+            "🔴": "Red Circle",
+            "🟢": "Green Circle"
+        }
+        
+        selected_emoji = st.selectbox(
+            "Select Emoji",
+            options=list(emoji_options.keys()),
+            format_func=lambda x: f"{x} {emoji_options[x]}"
+        )
+        
+        # Format message with emoji
+        formatted_message = f"{selected_emoji} *{alert_type}*\n\n{alert_message}"
+    else:
+        formatted_message = f"*{alert_type}*\n\n{alert_message}"
+    
+    # Preview message
+    st.subheader("Message Preview")
+    st.info(formatted_message)
+
+# Send button (centered)
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    if st.button("🔔 Send Alert", type="primary", use_container_width=True):
+        if alert_message.strip():
+            try:
+                # Send the alert
+                send_telegram_alert(formatted_message)
+                st.success("✅ Alert sent successfully!")
+            except Exception as e:
+                st.error(f"❌ Error sending alert: {str(e)}")
+        else:
+            st.warning("⚠️ Please enter a message before sending.")
+
+def get_all_alerts():
+    all_alerts = []  
+    return all_alerts
+
+# Streamlit UI
+st.sidebar.header ("Manual alerts")
+st.sidebar.info("Press the button below to manually send all alerts.")
+
+# Button for manual alerts
+if st.sidebar.button("Send Manual Alerts"):
+    all_alerts = get_all_alerts()
+    if all_alerts:
+        for alert in all_alerts:
+            result = send_telegram_alert(alert)
+            st.success(result)
+else:
+    st.sidebar.warning("No alerts to send.")
 
 # Add a refresh button for real-time updates
 if st.button("🔄 Refresh Alerts"):
