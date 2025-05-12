@@ -182,8 +182,13 @@ def download_bhavcopy(date):
             return file_path  # Use cached file
 
         try:
-            response = requests.get(url, timeout=10)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
+
                 with open(file_path, "wb") as f:
                     f.write(response.content)
                 st.success(f"✅ Successfully downloaded Bhavcopy for {date.strftime('%d-%m-%Y')}")
